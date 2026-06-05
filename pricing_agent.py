@@ -21,8 +21,8 @@ STRATEGY_FACTORS = {
     "clear_inventory": -0.035,
 }
 
-AUTO_APPROVE_MAX_CHANGE = 0.07
-MEDIUM_RISK_MAX_CHANGE = 0.20
+AUTO_APPROVE_MAX_CHANGE = 0.03
+MEDIUM_RISK_MAX_CHANGE = 0.05
 STOP_TOKENS = {"the", "and", "with", "for", "of", "by", "series"}
 
 

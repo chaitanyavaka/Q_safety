@@ -52,7 +52,7 @@ class LiveMarketDataService:
                 provider=self.provider_name,
                 query=query,
                 observations=[],
-                message="SERPAPI_API_KEY is not configured, so the backend used sample competitor data.",
+                message="Live market API key is not configured, so the backend used sample competitor data.",
                 rejected_observations=[],
             )
 
@@ -80,15 +80,15 @@ class LiveMarketDataService:
                         continue
                     rejected.append(row)
 
-                if len(observations) >= 3:
+                if len(observations) >= 3 and self._has_amazon_observation(observations):
                     break
-        except requests.RequestException as exc:
+        except requests.RequestException:
             return MarketFetchResult(
                 status="error",
                 provider=self.provider_name,
                 query=query,
                 observations=[],
-                message=f"Live market provider failed: {exc}",
+                message="Live market lookup failed, so available catalog competitor data was used.",
                 rejected_observations=[],
             )
 
@@ -129,7 +129,7 @@ class LiveMarketDataService:
     @staticmethod
     def _queries_for_product(sku: str, product: dict[str, Any] | None) -> list[str]:
         if not product:
-            return [sku]
+            return [sku, f"Amazon {sku}"]
 
         primary_parts = [
             product.get("mpn") or sku,
@@ -146,7 +146,14 @@ class LiveMarketDataService:
             query = " ".join(str(part).strip() for part in parts if str(part).strip())
             if query and query not in queries:
                 queries.append(query)
+                amazon_query = f"Amazon {query}"
+                if amazon_query not in queries:
+                    queries.append(amazon_query)
         return queries or [sku]
+
+    @staticmethod
+    def _has_amazon_observation(observations: list[dict[str, Any]]) -> bool:
+        return any("amazon" in str(item.get("source", "")).lower() for item in observations)
 
     def _search_google_shopping(self, query: str) -> dict[str, Any]:
         response = requests.get(

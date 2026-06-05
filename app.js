@@ -388,6 +388,10 @@ function AutoAppliedQueue({ items }) {
 }
 
 function BulkReviewQueue({ items, reloadCatalog, onUpdate, currentPayload }) {
+  const [savingAction, setSavingAction] = React.useState("");
+  const [message, setMessage] = React.useState("");
+  const [error, setError] = React.useState("");
+
   if (!items.length) {
     return h(
       "section",
@@ -398,58 +402,68 @@ function BulkReviewQueue({ items, reloadCatalog, onUpdate, currentPayload }) {
   }
 
   async function runBulkAction(action) {
+    setSavingAction(action);
+    setMessage("");
+    setError("");
     const nextResults = [...currentPayload.results];
 
-    for (const item of items) {
-      const sku = item.product?.sku || item.input?.sku;
-      const price = item.calculation?.recommended_price;
-      const response = await fetch("/api/price-action", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sku,
-          action,
-          route: item.calculation?.route,
-          risk: item.calculation?.risk,
-          note: action === "approve" ? "Bulk review approved." : "Bulk review rejected.",
-          price,
-        }),
+    try {
+      for (const item of items) {
+        const sku = item.product?.sku || item.input?.sku;
+        const price = item.calculation?.recommended_price;
+        const response = await fetch("/api/price-action", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sku,
+            action,
+            route: item.calculation?.route,
+            risk: item.calculation?.risk,
+            note: action === "approve" ? "Bulk review approved." : "Bulk review rejected.",
+            price,
+          }),
+        });
+        const data = await readJsonResponse(response);
+        if (!response.ok) {
+          throw new Error(data.error || `Bulk action failed for ${sku}`);
+        }
+
+        const index = nextResults.findIndex((result) => (result.product?.sku || result.input?.sku) === sku);
+        if (index >= 0) {
+          nextResults[index] = {
+            ...nextResults[index],
+            product: data.product || nextResults[index].product,
+            publish:
+              action === "approve"
+                ? {
+                    status: "applied",
+                    message: data.message,
+                    previous_price: data.previous_price,
+                    updated_price: data.updated_price,
+                  }
+                : {
+                    status: "rejected",
+                    message: data.message,
+                  },
+          };
+        }
+      }
+
+      await reloadCatalog();
+      onUpdate({
+        ...currentPayload,
+        results: nextResults,
+        summary: {
+          ...currentPayload.summary,
+          pending_review: nextResults.filter((item) => item.publish?.status === "pending_review").length,
+        },
       });
-      const data = await readJsonResponse(response)();
-      if (!response.ok) {
-        throw new Error(data.error || `Bulk action failed for ${sku}`);
-      }
-
-      const index = nextResults.findIndex((result) => (result.product?.sku || result.input?.sku) === sku);
-      if (index >= 0) {
-        nextResults[index] = {
-          ...nextResults[index],
-          product: data.product || nextResults[index].product,
-          publish:
-            action === "approve"
-              ? {
-                  status: "applied",
-                  message: data.message,
-                  previous_price: data.previous_price,
-                  updated_price: data.updated_price,
-                }
-              : {
-                  status: "rejected",
-                  message: data.message,
-                },
-        };
-      }
+      setMessage(action === "approve" ? "All medium-risk items were approved." : "All medium-risk items were rejected.");
+    } catch (err) {
+      setError(err.message || "Could not complete the bulk review action.");
+    } finally {
+      setSavingAction("");
     }
-
-    await reloadCatalog();
-    onUpdate({
-      ...currentPayload,
-      results: nextResults,
-      summary: {
-        ...currentPayload.summary,
-        pending_review: nextResults.filter((item) => item.publish?.status === "pending_review").length,
-      },
-    });
   }
 
   return h(
@@ -460,9 +474,19 @@ function BulkReviewQueue({ items, reloadCatalog, onUpdate, currentPayload }) {
     h(
       "div",
       { className: "approval-actions bulk-actions" },
-      h("button", { type: "button", className: "primary-button compact", onClick: () => runBulkAction("approve") }, "Approve all medium-risk"),
-      h("button", { type: "button", className: "ghost-button", onClick: () => runBulkAction("reject") }, "Reject all medium-risk")
+      h(
+        "button",
+        { type: "button", className: "primary-button compact", disabled: Boolean(savingAction), onClick: () => runBulkAction("approve") },
+        savingAction === "approve" ? "Approving..." : "Approve all medium-risk"
+      ),
+      h(
+        "button",
+        { type: "button", className: "ghost-button", disabled: Boolean(savingAction), onClick: () => runBulkAction("reject") },
+        savingAction === "reject" ? "Rejecting..." : "Reject all medium-risk"
+      )
     ),
+    message ? h("p", { className: "success-note" }, message) : null,
+    error ? h("p", { className: "error-note" }, error) : null,
     h(
       "div",
       { className: "catalog-list" },
@@ -787,12 +811,13 @@ function CompetitorProductCard({ product }) {
 
 function MarketStatus({ marketData }) {
   if (!marketData) return null;
-  const usedLive = marketData.pricing_source === "live";
+  const usedLive = ["live", "partial_live"].includes(marketData.mode);
+  const hasPricingRows = (marketData.pricing_count || 0) > 0;
   return h(
     "div",
     { className: `market-status ${usedLive ? "live" : "fallback"}` },
-    h("strong", null, usedLive ? "Live market data used" : "No competitor found"),
-    h("span", null, `${marketData.provider}: ${marketData.message} Live comparable found: ${marketData.live_count || 0}; excluded: ${marketData.excluded_count || 0}; pricing rows used: ${marketData.pricing_count || 0}.`)
+    h("strong", null, usedLive ? "Live market data used" : hasPricingRows ? "Catalog competitor data used" : "No competitor found"),
+    h("span", null, `${marketData.message} Live comparable found: ${marketData.live_count || 0}; excluded: ${marketData.excluded_count || 0}; pricing rows used: ${marketData.pricing_count || 0}.`)
   );
 }
 

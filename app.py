@@ -58,7 +58,8 @@ def create_app() -> Flask:
 
     def summarize_analysis_for_catalog(result: dict[str, Any]) -> dict[str, Any]:
         calc = result.get("calculation", {})
-        competitors = result.get("competitors", [])[:6]
+        product = result.get("product") or {}
+        competitors = competitors_with_required_amazon(product, result.get("competitors", []))[:6]
         return {
             "recommended_price": calc.get("recommended_price"),
             "risk": calc.get("risk"),
@@ -79,6 +80,44 @@ def create_app() -> Flask:
                 for item in competitors
             ],
         }
+
+    def competitors_with_required_amazon(
+        product: dict[str, Any] | None,
+        competitors: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        rows = [dict(item) for item in competitors]
+        if product and not any(is_amazon_source(row) for row in rows):
+            amazon_row = catalog_amazon_competitor(product)
+            if amazon_row:
+                rows.append(amazon_row)
+
+        rows.sort(
+            key=lambda row: (
+                0 if is_amazon_source(row) else 1,
+                -float(row.get("match_score", 0) or 0),
+                float(row.get("normalized_price", row.get("price", 0)) or 0),
+            )
+        )
+        return rows
+
+    def is_amazon_source(item: dict[str, Any]) -> bool:
+        return "amazon" in str(item.get("source", "")).lower()
+
+    def catalog_amazon_competitor(product: dict[str, Any]) -> dict[str, Any] | None:
+        for item in product.get("competitors", []):
+            if not is_amazon_source(item):
+                continue
+            row = dict(item)
+            row.setdefault("title", product.get("product", ""))
+            row.setdefault("offer_sku", product.get("mpn") or product.get("sku", ""))
+            row.setdefault("normalized_price", row.get("price"))
+            row.setdefault("normalized_uom", product.get("uom", "EA"))
+            row.setdefault("package_quantity", 1)
+            row.setdefault("package_type", str(product.get("uom", "EA")).lower())
+            row.setdefault("comparable", True)
+            row["data_source"] = row.get("data_source") or "required_amazon_catalog"
+            return row
+        return None
 
     def catalog_summary_with_latest_analysis() -> dict[str, Any]:
         summary = agent.catalog_summary()
@@ -157,7 +196,7 @@ def create_app() -> Flask:
             market_message = live_result.message
             excluded_competitors = live_result.rejected_observations
             live_candidate_count = len(live_result.observations)
-            competitor_override = live_result.observations
+            competitor_override = competitors_with_required_amazon(product, live_result.observations)
             market_mode = live_result.status
         else:
             competitor_override = list((product or {}).get("competitors", []))
@@ -227,8 +266,17 @@ def create_app() -> Flask:
 
         return result
 
+    def no_cache(response):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+        return response
+
+    def uncached_page(filename: str):
+        return no_cache(send_from_directory(BASE_DIR, filename, max_age=0, conditional=False))
+
     def page(filename: str):
-        return send_from_directory(BASE_DIR, filename)
+        return uncached_page(filename)
 
     @app.get("/")
     def index():
@@ -248,11 +296,11 @@ def create_app() -> Flask:
 
     @app.get("/styles.css")
     def styles():
-        return send_from_directory(BASE_DIR, "styles.css")
+        return uncached_page("styles.css")
 
     @app.get("/app.js")
     def frontend_app():
-        return send_from_directory(BASE_DIR, "app.js")
+        return uncached_page("app.js")
 
     @app.get("/assets/<path:filename>")
     def assets(filename: str):
