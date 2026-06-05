@@ -3,6 +3,7 @@ const h = React.createElement;
 const pageName = document.body.dataset.page || "dashboard";
 const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" });
 const pct = new Intl.NumberFormat("en-US", { style: "percent", maximumFractionDigits: 1 });
+const appRouteVersion = "20260605";
 
 async function readJsonResponse(response) {
   const text = await response.text();
@@ -21,7 +22,7 @@ function App() {
 
   const loadCatalog = React.useCallback(async () => {
     try {
-      const response = await fetch("/api/catalog");
+      const response = await fetch(`/api/catalog?v=${appRouteVersion}`);
       // const text = await response.text();
       // const data = text ? JSON.parse(text) : null;
       const data = await readJsonResponse(response);
@@ -61,14 +62,14 @@ function Header({ active }) {
     { className: "topbar" },
     h(
       "a",
-      { className: "brand", href: "/" },
+      { className: "brand", href: versionedPath("/") },
       h("span", { className: "brand-mark" }, "AIS"),
       h("span", null, h("strong", null, "American industrial safety product"), h("small", null, "Pricing Agent"))
     ),
     h(
       "nav",
       { className: "nav-links", "aria-label": "Primary" },
-      links.map(([href, label, key]) => h("a", { key, href, className: active === key ? "active" : "" }, label))
+      links.map(([href, label, key]) => h("a", { key, href: versionedPath(href), className: active === key ? "active" : "" }, label))
     )
   );
 }
@@ -108,9 +109,9 @@ function DashboardPage({ catalog }) {
     h(
       "section",
       { className: "action-grid" },
-      h(ActionCard, { href: "/analyzer", title: "Run Full Catalog Analyzer", text: "Check every Quest SKU in one run and publish low-risk price changes automatically." }),
-      h(ActionCard, { href: "/catalog", title: "Browse Catalog", text: "Review product-only catalog rows." }),
-      h(ActionCard, { href: "/competitor", title: "View Competitors", text: "After an agent run, compare competitor names and prices by SKU." })
+      h(ActionCard, { href: versionedPath("/analyzer"), title: "Run Full Catalog Analyzer", text: "Check every Quest SKU in one run and publish low-risk price changes automatically." }),
+      h(ActionCard, { href: versionedPath("/catalog"), title: "Browse Catalog", text: "Review product-only catalog rows." }),
+      h(ActionCard, { href: versionedPath("/competitor"), title: "View Competitors", text: "After an agent run, compare competitor names and prices by SKU." })
     ),
     h(
       "section",
@@ -836,6 +837,10 @@ function Metric({ label, value, clickable = false, onClick = null }) {
 
 function ActionCard({ href, title, text }) {
   return h("a", { className: "action-card", href }, h("h2", null, title), h("p", null, text));
+}
+
+function versionedPath(path) {
+  return `${path}?v=${appRouteVersion}`;
 }
 
 function Field({ label, children }) {
